@@ -18,6 +18,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# git/gh escrevem diagnóstico em stderr; no PowerShell isso não deve abortar o script.
+$PSNativeCommandUseErrorActionPreference = $false
 $Repo = 'unitecnologia/unitec-mesas'
 $Raiz = Split-Path -Parent $PSScriptRoot
 Set-Location $Raiz
@@ -123,21 +125,27 @@ if ($status) {
 }
 
 # 5) Tag + Release
-$temTag = git rev-parse "refs/tags/$Tag" 2>$null
+$temTag = $false
+git rev-parse "refs/tags/$Tag" *> $null
+if ($LASTEXITCODE -eq 0) { $temTag = $true }
 if (-not $temTag) {
     Write-Host ">> Criando tag $Tag..."
     git tag -a $Tag -m "Unitec Mesas $Tag"
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao criar a tag $Tag." }
     git push origin $Tag
     if ($LASTEXITCODE -ne 0) { throw "Falha ao enviar a tag $Tag." }
 } else {
     Write-Host ">> Tag $Tag já existe localmente."
-    git push origin $Tag 2>$null
+    git push origin $Tag *> $null
 }
 
 Write-Host '>> Publicando GitHub Release...'
+$releaseExiste = $false
 gh release view $Tag --repo $Repo *> $null
-if ($LASTEXITCODE -eq 0) {
+if ($LASTEXITCODE -eq 0) { $releaseExiste = $true }
+if ($releaseExiste) {
     gh release upload $Tag "$Saida\$Asset" "$Saida\$Asset.sha256" --repo $Repo --clobber
+    if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar os arquivos da Release.' }
     gh release edit $Tag --repo $Repo --notes-file "$Saida\notes.md" --title "Unitec Mesas $Tag"
 } else {
     gh release create $Tag "$Saida\$Asset" "$Saida\$Asset.sha256" `
