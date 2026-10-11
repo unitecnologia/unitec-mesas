@@ -83,15 +83,16 @@ $Asset = "unitec-mesas-$nome.apk"
 Copy-Item $Src "$Saida\$Asset" -Force
 $sha = (Get-FileHash "$Saida\$Asset" -Algorithm SHA256).Hash.ToLower()
 [IO.File]::WriteAllText("$Raiz\$Saida\$Asset.sha256", "$sha  $Asset`n")
+# Notas em ASCII para evitar corrupcao de acentos no PowerShell/Windows.
 $notas = @"
 Unitec Mesas $Tag
 
-- Versão: $nome (versionCode $code)
+- Versao: $nome (versionCode $code)
 - APK: ``$Asset``
 - SHA-256 do APK: ``$sha``
 - Certificado de assinatura (SHA-256): ``$obtido``
 
-O app consulta esta Release (releases/latest) e só baixa/instala após o usuário tocar em OK.
+O app consulta esta Release (releases/latest) e so baixa/instala apos o usuario tocar em OK.
 "@
 [IO.File]::WriteAllText("$Raiz\$Saida\notes.md", $notas, (New-Object Text.UTF8Encoding $false))
 
