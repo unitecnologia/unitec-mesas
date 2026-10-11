@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/app_state.dart';
 import '../core/formato.dart';
 import '../core/modelos.dart';
+import 'configuracoes_tela.dart';
 import 'mesa_tela.dart';
 import 'pedidos_tela.dart';
 import 'widgets.dart';
@@ -66,6 +67,12 @@ class _MesasTelaState extends State<MesasTela> {
     if (mounted) _recarregar();
   }
 
+  Future<void> _abrirConfiguracoes() async {
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => ConfiguracoesTela(state: _st),
+    ));
+  }
+
   Future<void> _menu(String acao) async {
     switch (acao) {
       case 'produtos':
@@ -74,6 +81,8 @@ class _MesasTelaState extends State<MesasTela> {
         if (mounted) {
           avisar(context, ok ? 'Produtos atualizados.' : (_st.sync.avisoCatalogo ?? 'Falha ao atualizar.'), erro: !ok);
         }
+      case 'configuracoes':
+        await _abrirConfiguracoes();
       case 'sair':
         final pend = _st.sync.pendentes + _st.sync.erros;
         final texto = pend > 0
@@ -103,6 +112,7 @@ class _MesasTelaState extends State<MesasTela> {
             onSelected: _menu,
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'produtos', child: Text('Atualizar produtos')),
+              PopupMenuItem(value: 'configuracoes', child: Text('Configurações')),
               PopupMenuItem(value: 'sair', child: Text('Trocar garçom')),
             ],
           ),

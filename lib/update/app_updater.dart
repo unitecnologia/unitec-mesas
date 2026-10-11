@@ -44,6 +44,15 @@ class AtualizacaoException implements Exception {
   String toString() => message;
 }
 
+/// Resultado de uma consulta à GitHub Release.
+/// [release] só vem preenchido quando existe versão mais nova.
+class ResultadoAtualizacao {
+  const ResultadoAtualizacao({this.release, this.falhou = false});
+
+  final AppRelease? release;
+  final bool falhou;
+}
+
 /// Atualização do APK pela GitHub Release pública do Unitec Mesas (sem token).
 ///
 /// Só troca o APK: não toca em SQLite, sessão, configuração nem pedidos pendentes.
@@ -77,13 +86,23 @@ class AppUpdater {
   /// Release mais nova que a instalada, ou null (já atualizado, offline, falha).
   /// Sem [forcar], consulta no máximo uma vez a cada [_intervalo]. Nunca lança.
   Future<AppRelease?> verificar({bool forcar = false}) async {
-    if (!Platform.isAndroid) return null;
+    final r = await consultar(forcar: forcar);
+    return r.release;
+  }
+
+  /// Igual a [verificar], mas distingue "já está atualizado" de falha de rede.
+  /// O botão Verificar atualizações usa [forcar] para consultar na hora.
+  Future<ResultadoAtualizacao> consultar({bool forcar = false}) async {
+    if (!Platform.isAndroid) return const ResultadoAtualizacao();
     try {
       final prefs = await SharedPreferences.getInstance();
       final ultima = prefs.getInt(_prefUltimaConsulta) ?? 0;
       final agora = DateTime.now().millisecondsSinceEpoch;
-      if (!forcar && !_buildTeste && agora >= ultima && agora - ultima < _intervalo.inMilliseconds) {
-        return null;
+      if (!forcar &&
+          !_buildTeste &&
+          agora >= ultima &&
+          agora - ultima < _intervalo.inMilliseconds) {
+        return const ResultadoAtualizacao();
       }
       if (!baixando) await _limparDownloadsAntigos();
 
@@ -96,14 +115,18 @@ class AppUpdater {
       if (r.statusCode == 200 || r.statusCode == 404) {
         await prefs.setInt(_prefUltimaConsulta, agora);
       }
-      if (r.statusCode != 200) return null;
+      if (r.statusCode != 200) {
+        return ResultadoAtualizacao(falhou: r.statusCode != 404);
+      }
 
       final release = parseRelease(jsonDecode(r.body));
-      if (release == null || !ehMaisNova(release)) return null;
-      return release;
+      if (release == null || !ehMaisNova(release)) {
+        return const ResultadoAtualizacao();
+      }
+      return ResultadoAtualizacao(release: release);
     } catch (e) {
       debugPrint('Atualização: consulta ignorada ($e)');
-      return null;
+      return const ResultadoAtualizacao(falhou: true);
     }
   }
 

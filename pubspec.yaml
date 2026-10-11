@@ -1,7 +1,7 @@
 name: unitec_mesas
 description: Unitec Mesas - app do garçom integrado às mesas do PDV do Unitec ERP (offline-first).
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.12.2
