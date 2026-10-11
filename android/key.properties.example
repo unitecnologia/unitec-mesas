@@ -1,0 +1,7 @@
+# Copie para android/key.properties (este arquivo NÃO vai para o Git).
+# A mesma chave deve ser usada em todas as versões do Unitec Mesas.
+storePassword=COLOQUE_A_SENHA
+keyPassword=COLOQUE_A_SENHA
+keyAlias=unitecmesas
+storeFile=../../ci/unitecmesas-release.p12
+storeType=pkcs12

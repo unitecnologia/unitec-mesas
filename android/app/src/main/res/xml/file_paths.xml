@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- APK de atualização (cache/atualizacao) → instalador do Android. -->
+<paths>
+    <cache-path name="cache" path="." />
+</paths>
