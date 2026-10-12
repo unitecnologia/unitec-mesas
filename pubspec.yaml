@@ -1,7 +1,7 @@
 name: unitec_mesas
 description: Unitec Mesas - app do garçom integrado às mesas do PDV do Unitec ERP (offline-first).
 publish_to: "none"
-version: 1.0.3+4
+version: 1.0.4+5
 
 environment:
   sdk: ^3.12.2
@@ -18,6 +18,8 @@ dependencies:
   connectivity_plus: ^6.1.0
   crypto: ^3.0.7
   path_provider: ^2.1.6
+  # Fixado: versoes 1.5+ exigem toolchain Android mais novo (igual FV).
+  wakelock_plus: 1.2.8
 
 dev_dependencies:
   flutter_lints: ^5.0.0

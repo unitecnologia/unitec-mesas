@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'core/app_state.dart';
 import 'telas/aguardando_tela.dart';
@@ -12,6 +13,8 @@ import 'update/update_dialog.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  // Mantém a tela ligada enquanto o app estiver aberto (igual FV).
+  await WakelockPlus.enable();
   final state = await AppState.iniciar();
   runApp(UnitecMesasApp(state: state));
 }
@@ -54,6 +57,9 @@ class _UnitecMesasAppState extends State<UnitecMesasApp> with WidgetsBindingObse
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState s) {
+    if (s == AppLifecycleState.resumed) {
+      WakelockPlus.enable();
+    }
     final st = widget.state;
     if (st.etapa != Etapa.mesas) return;
     if (s == AppLifecycleState.resumed) {
