@@ -299,11 +299,13 @@ class AppUpdater {
     final pacote = info?['packageName']?.toString();
     final atual = info?['currentPackage']?.toString();
     final code = (info?['versionCode'] as num?)?.toInt();
-    if (info == null || pacote == null || pacote != atual || code == null) {
+    // Preferir versionCode real do pacote instalado (nativo); fallback ao build compilado.
+    final instalado = (info?['currentVersionCode'] as num?)?.toInt() ?? kAppBuild;
+    if (info == null || pacote == null || atual == null || pacote != atual || code == null) {
       await File(path).delete();
       throw AtualizacaoException(msgInvalido);
     }
-    if (code <= kAppBuild) {
+    if (code <= instalado) {
       await File(path).delete();
       throw AtualizacaoException('O aplicativo já está na versão mais recente.');
     }

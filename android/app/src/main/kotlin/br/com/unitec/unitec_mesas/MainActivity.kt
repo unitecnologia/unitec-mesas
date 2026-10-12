@@ -1,5 +1,6 @@
 package br.com.unitec.unitec_mesas
 
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -69,10 +70,32 @@ class MainActivity : FlutterActivity() {
             "versionCode" to code,
             "versionName" to info.versionName,
             "currentPackage" to packageName,
+            "currentVersionCode" to currentVersionCode(),
         )
     }
 
-    /** Abre o instalador padrão do Android (o usuário confirma a atualização). */
+    private fun currentVersionCode(): Long {
+        val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            packageManager.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(0))
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, 0)
+        }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+    }
+
+    /**
+     * Abre o instalador padrão do Android.
+     *
+     * ClipData + grantUriPermission nas activities resolvidas são necessários
+     * para o PackageInstaller ler o APK via FileProvider (sem isso o Android
+     * costuma responder "O app não foi instalado").
+     */
     private fun installApk(path: String): Boolean {
         val file = File(path)
         if (!file.exists() || file.length() == 0L) return false
@@ -83,9 +106,24 @@ class MainActivity : FlutterActivity() {
         )
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            clipData = ClipData.newUri(contentResolver, "apk", uri)
         }
+
+        val resolvers = packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        for (info in resolvers) {
+            val pkg = info.activityInfo?.packageName ?: continue
+            grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+
+        if (resolvers.isEmpty()) {
+            // Fallback: ainda tenta abrir (alguns OEMs não listam o instalador).
+            startActivity(intent)
+            return true
+        }
+
         startActivity(intent)
         return true
     }

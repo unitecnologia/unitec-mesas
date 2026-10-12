@@ -2,4 +2,6 @@
 <!-- APK de atualização (cache/atualizacao) → instalador do Android. -->
 <paths>
     <cache-path name="cache" path="." />
+    <cache-path name="atualizacao" path="atualizacao/" />
+    <external-cache-path name="ext_cache" path="." />
 </paths>
