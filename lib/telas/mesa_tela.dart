@@ -7,6 +7,7 @@ import '../core/app_state.dart';
 import '../core/formato.dart';
 import '../core/modelos.dart';
 import 'item_sheet.dart';
+import 'tab_preco_sheet.dart';
 import 'widgets.dart';
 
 class MesaTela extends StatefulWidget {
@@ -97,10 +98,37 @@ class _MesaTelaState extends State<MesaTela> with SingleTickerProviderStateMixin
   }
 
   Future<void> _adicionar(Produto p) async {
-    final item = await mostrarItemSheet(context, produto: p);
+    double? precoOverride;
+    String? nivel;
+
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    final tab = await _st.db.tabPrecoDoProduto(p.id);
+    if (!mounted) return;
+    if (tab != null && tab.ativo) {
+      final escolha = await mostrarTabPrecoSheet(
+        context,
+        produtoNome: p.descricao,
+        info: tab,
+      );
+      if (escolha == null || !mounted) return;
+      precoOverride = escolha.preco;
+      nivel = escolha.nivel;
+    }
+
+    final item = await mostrarItemSheet(
+      context,
+      produto: p,
+      precoOverride: precoOverride,
+      nivel: nivel,
+    );
     if (item == null) return;
     setState(() {
-      final igual = _itens.where((i) => i.productId == item.productId && i.obs == item.obs && i.preco == item.preco);
+      final igual = _itens.where((i) =>
+          i.productId == item.productId &&
+          i.obs == item.obs &&
+          i.preco == item.preco &&
+          i.nivel == item.nivel);
       if (igual.isNotEmpty) {
         igual.first.quantidade = double.parse((igual.first.quantidade + item.quantidade).toStringAsFixed(3));
       } else {
@@ -313,9 +341,19 @@ class _MesaTelaState extends State<MesaTela> with SingleTickerProviderStateMixin
           ListTile(
             dense: true,
             title: Text('${quantidade((it['quantidade'] as num).toDouble())} × ${it['descricao']}'),
-            subtitle: '${it['obs'] ?? ''}'.isEmpty
-                ? null
-                : Text('Obs: ${it['obs']}', style: const TextStyle(color: Color(0xFFB45309))),
+            subtitle: () {
+              final nivel = '${it['tabela_nivel'] ?? it['nivel'] ?? ''}'.trim();
+              final obs = '${it['obs'] ?? ''}'.trim();
+              final parts = <String>[
+                if (nivel.isNotEmpty) nivel.toUpperCase(),
+                if (obs.isNotEmpty) 'Obs: $obs',
+              ];
+              if (parts.isEmpty) return null;
+              return Text(
+                parts.join(' · '),
+                style: obs.isNotEmpty ? const TextStyle(color: Color(0xFFB45309)) : null,
+              );
+            }(),
             trailing: Text(moeda((it['total'] as num).toDouble())),
           ),
         if (itens.isNotEmpty)
@@ -389,6 +427,7 @@ class _CarrinhoSheetState extends State<_CarrinhoSheet> {
                   title: Text(it.descricao, maxLines: 2, overflow: TextOverflow.ellipsis),
                   subtitle: Text(
                     '${quantidade(it.quantidade)} ${it.unidade} × ${moeda(it.preco)}'
+                    '${it.nivel != null ? ' · ${it.nivel!.toUpperCase()}' : ''}'
                     '${it.obs.isNotEmpty ? '\nObs: ${it.obs}' : ''}',
                   ),
                   isThreeLine: it.obs.isNotEmpty,
@@ -397,7 +436,12 @@ class _CarrinhoSheetState extends State<_CarrinhoSheet> {
                     IconButton(
                       icon: const Icon(Icons.edit_outlined, size: 20),
                       onPressed: () async {
-                        final novo = await mostrarItemSheet(context, item: it);
+                        final novo = await mostrarItemSheet(
+                          context,
+                          item: it,
+                          precoOverride: it.preco,
+                          nivel: it.nivel,
+                        );
                         if (novo != null) {
                           _alterar(() {
                             it.quantidade = novo.quantidade;

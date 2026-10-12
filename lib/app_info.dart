@@ -3,5 +3,5 @@
 /// Mantenha em sincronia com a linha `version:` do pubspec.yaml
 /// (`kAppVersion+kAppBuild`). O kAppBuild é o versionCode do Android:
 /// precisa subir a cada versão publicada na GitHub Release.
-const String kAppVersion = '1.0.1';
-const int kAppBuild = 2;
+const String kAppVersion = '1.0.2';
+const int kAppBuild = 3;

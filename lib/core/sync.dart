@@ -200,10 +200,19 @@ class SyncService extends ChangeNotifier {
   Future<bool> atualizarCatalogo({bool forcar = false}) async {
     _ultimoCatalogo = DateTime.now();
     try {
-      final r = await api.catalogo(forcar ? '' : config.catalogoVersao);
+      // Após upgrade do app: catálogo antigo sem Tab. Preço — força um pull completo.
+      var versao = forcar ? '' : config.catalogoVersao;
+      if (!forcar && versao.isNotEmpty && await db.meta('tab_preco_sync') != '1') {
+        versao = '';
+      }
+      final r = await api.catalogo(versao);
       _setOnline(true);
       if (r['inalterado'] != true) {
-        await db.substituirProdutos(r['produtos'] as List<dynamic>? ?? const []);
+        final tab = r['tab_preco'];
+        await db.substituirProdutos(
+          r['produtos'] as List<dynamic>? ?? const [],
+          tabPreco: tab is Map ? Map<String, dynamic>.from(tab) : null,
+        );
         config.catalogoVersao = '${r['versao'] ?? ''}';
         config.catalogoAtualizadoEm = DateTime.now().toIso8601String();
         await config.save();

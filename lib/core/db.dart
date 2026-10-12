@@ -17,7 +17,7 @@ class LocalDb {
     final dir = await getDatabasesPath();
     final db = await openDatabase(
       p.join(dir, 'unitec_mesas.db'),
-      version: 1,
+      version: 3,
       onCreate: (db, _) async {
         final b = db.batch();
         b.execute('''
@@ -26,6 +26,11 @@ class LocalDb {
             busca TEXT, unidade TEXT, preco REAL, grupo TEXT, pesado INTEGER)''');
         b.execute('CREATE INDEX idx_produtos_codigo ON produtos(codigo)');
         b.execute('CREATE INDEX idx_produtos_barras ON produtos(barras)');
+        b.execute('''
+          CREATE TABLE produto_tab_preco(
+            product_id INTEGER PRIMARY KEY,
+            niveis_json TEXT NOT NULL,
+            precos_json TEXT NOT NULL)''');
         b.execute('''
           CREATE TABLE mesas(
             numero INTEGER PRIMARY KEY, qtd INTEGER, total REAL, situacao INTEGER,
@@ -41,7 +46,22 @@ class LocalDb {
             tentativas INTEGER DEFAULT 0, proxima_tentativa INTEGER DEFAULT 0,
             enviado_em TEXT)''');
         b.execute('CREATE INDEX idx_pedidos_status ON pedidos(status, criado_em)');
+        b.execute('CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT)');
         await b.commit(noResult: true);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS produto_tab_preco(
+              product_id INTEGER PRIMARY KEY,
+              niveis_json TEXT NOT NULL,
+              precos_json TEXT NOT NULL)''');
+        }
+        if (oldVersion < 3) {
+          await db.execute('CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT)');
+          // Força novo pull do catálogo com tab_preco na próxima sync.
+          await db.delete('meta', where: 'k = ?', whereArgs: ['tab_preco_sync']);
+        }
       },
     );
     return LocalDb._(db);
@@ -50,9 +70,10 @@ class LocalDb {
   // ---------------------------------------------------------------- catálogo
 
   /// Troca o catálogo inteiro numa transação (nunca fica pela metade).
-  Future<void> substituirProdutos(List<dynamic> linhas) async {
+  Future<void> substituirProdutos(List<dynamic> linhas, {Map<String, dynamic>? tabPreco}) async {
     await _db.transaction((txn) async {
       await txn.delete('produtos');
+      await txn.delete('produto_tab_preco');
       var batch = txn.batch();
       var n = 0;
       for (final l in linhas) {
@@ -74,12 +95,48 @@ class LocalDb {
           batch = txn.batch();
         }
       }
+      if (tabPreco != null) {
+        for (final e in tabPreco.entries) {
+          final id = int.tryParse('${e.key}');
+          if (id == null || e.value is! Map) continue;
+          final info = TabPrecoInfo.fromApi(Map<String, dynamic>.from(e.value as Map));
+          if (!info.ativo) continue;
+          batch.insert('produto_tab_preco', info.toRow(id));
+          if (++n % 500 == 0) {
+            await batch.commit(noResult: true);
+            batch = txn.batch();
+          }
+        }
+      }
       await batch.commit(noResult: true);
+      // Só marca sync OK quando a API enviou a chave tab_preco (mesmo vazia).
+      if (tabPreco != null) {
+        await txn.insert(
+          'meta',
+          {'k': 'tab_preco_sync', 'v': '1'},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
     });
+  }
+
+  Future<TabPrecoInfo?> tabPrecoDoProduto(int productId) async {
+    final rows = await _db.query('produto_tab_preco', where: 'product_id = ?', whereArgs: [productId], limit: 1);
+    if (rows.isEmpty) return null;
+    final info = TabPrecoInfo.fromRow(rows.first);
+    return info.ativo ? info : null;
   }
 
   Future<int> contarProdutos() async =>
       Sqflite.firstIntValue(await _db.rawQuery('SELECT COUNT(*) FROM produtos')) ?? 0;
+
+  Future<String?> meta(String key) async {
+    final rows = await _db.query('meta', where: 'k = ?', whereArgs: [key], limit: 1);
+    return rows.isEmpty ? null : rows.first['v'] as String?;
+  }
+
+  Future<void> setMeta(String key, String value) =>
+      _db.insert('meta', {'k': key, 'v': value}, conflictAlgorithm: ConflictAlgorithm.replace);
 
   Future<List<Produto>> buscarProdutos(String termo, {int limite = 60}) async {
     final t = normalizarBusca(termo);

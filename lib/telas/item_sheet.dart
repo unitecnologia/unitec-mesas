@@ -4,23 +4,36 @@ import '../core/formato.dart';
 import '../core/modelos.dart';
 
 /// Quantidade + observação de um item. Novo (produto) ou edição (item).
-Future<ItemPedido?> mostrarItemSheet(BuildContext context, {Produto? produto, ItemPedido? item}) {
+Future<ItemPedido?> mostrarItemSheet(
+  BuildContext context, {
+  Produto? produto,
+  ItemPedido? item,
+  double? precoOverride,
+  String? nivel,
+}) {
   return showModalBottomSheet<ItemPedido>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     builder: (_) => Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: _ItemSheet(produto: produto, item: item),
+      child: _ItemSheet(
+        produto: produto,
+        item: item,
+        precoOverride: precoOverride,
+        nivel: nivel ?? item?.nivel,
+      ),
     ),
   );
 }
 
 class _ItemSheet extends StatefulWidget {
-  const _ItemSheet({this.produto, this.item});
+  const _ItemSheet({this.produto, this.item, this.precoOverride, this.nivel});
 
   final Produto? produto;
   final ItemPedido? item;
+  final double? precoOverride;
+  final String? nivel;
 
   @override
   State<_ItemSheet> createState() => _ItemSheetState();
@@ -34,7 +47,7 @@ class _ItemSheetState extends State<_ItemSheet> {
   bool get _pesado => widget.produto?.pesado ?? widget.item?.pesado ?? false;
   String get _descricao => widget.produto?.descricao ?? widget.item!.descricao;
   String get _unidade => widget.produto?.unidade ?? widget.item!.unidade;
-  double get _preco => widget.produto?.preco ?? widget.item!.preco;
+  double get _preco => widget.precoOverride ?? widget.item?.preco ?? widget.produto?.preco ?? 0;
 
   @override
   void dispose() {
@@ -64,6 +77,7 @@ class _ItemSheetState extends State<_ItemSheet> {
         preco: _preco,
         obs: obs.length > 140 ? obs.substring(0, 140) : obs,
         pesado: _pesado,
+        nivel: widget.nivel,
       ),
     );
   }
@@ -78,7 +92,11 @@ class _ItemSheetState extends State<_ItemSheet> {
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Text(_descricao, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          Text('${moeda(_preco)} / $_unidade', style: TextStyle(color: cs.onSurfaceVariant)),
+          Text(
+            '${moeda(_preco)} / $_unidade'
+            '${widget.nivel != null ? ' · ${widget.nivel!.toUpperCase()}' : ''}',
+            style: TextStyle(color: cs.onSurfaceVariant),
+          ),
           const SizedBox(height: 14),
           if (_pesado)
             TextField(

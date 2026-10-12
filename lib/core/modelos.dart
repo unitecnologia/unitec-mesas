@@ -33,6 +33,69 @@ class Produto {
       );
 }
 
+/// Tab. Preço do produto (só existe com usa_tab_preco no ERP).
+class TabPrecoInfo {
+  TabPrecoInfo({required this.niveis, required this.precos});
+
+  final List<String> niveis;
+  final Map<String, double> precos;
+
+  bool get ativo => niveis.isNotEmpty;
+
+  double precoDo(String nivel) => precos[nivel] ?? 0;
+
+  factory TabPrecoInfo.fromApi(Map<String, dynamic> m) {
+    final niveisRaw = m['niveis'];
+    final precosRaw = m['precos'];
+    final niveis = <String>[];
+    if (niveisRaw is List) {
+      for (final n in niveisRaw) {
+        final s = '$n'.trim().toLowerCase();
+        if (s == 'varejo' || s == 'atacado' || s == 'especial') niveis.add(s);
+      }
+    }
+    final precos = <String, double>{};
+    if (precosRaw is Map) {
+      for (final e in precosRaw.entries) {
+        final k = '${e.key}'.trim().toLowerCase();
+        if (niveis.contains(k)) {
+          precos[k] = (e.value as num?)?.toDouble() ?? 0;
+        }
+      }
+    }
+    // Ordem estável V → A → E
+    const ordem = ['varejo', 'atacado', 'especial'];
+    final ordered = [for (final n in ordem) if (niveis.contains(n)) n];
+    return TabPrecoInfo(niveis: ordered, precos: precos);
+  }
+
+  factory TabPrecoInfo.fromRow(Map<String, Object?> r) {
+    List<String> niveis = const [];
+    Map<String, double> precos = const {};
+    try {
+      final n = jsonDecode('${r['niveis_json'] ?? '[]'}');
+      if (n is List) {
+        niveis = n.map((e) => '$e'.toLowerCase()).where((s) => s.isNotEmpty).toList();
+      }
+    } catch (_) {}
+    try {
+      final p = jsonDecode('${r['precos_json'] ?? '{}'}');
+      if (p is Map) {
+        precos = {
+          for (final e in p.entries) '${e.key}'.toLowerCase(): (e.value as num?)?.toDouble() ?? 0,
+        };
+      }
+    } catch (_) {}
+    return TabPrecoInfo(niveis: niveis, precos: precos);
+  }
+
+  Map<String, Object?> toRow(int productId) => {
+        'product_id': productId,
+        'niveis_json': jsonEncode(niveis),
+        'precos_json': jsonEncode(precos),
+      };
+}
+
 /// Situação vinda do servidor (mesmas regras do painel de mesas do PDV).
 class SituacaoMesa {
   static const livre = 0;
@@ -110,6 +173,7 @@ class ItemPedido {
     required this.preco,
     this.obs = '',
     this.pesado = false,
+    this.nivel,
   });
 
   final int productId;
@@ -119,6 +183,9 @@ class ItemPedido {
   double preco;
   String obs;
   final bool pesado;
+
+  /// Nível Tab. Preço (varejo/atacado/especial). Null = produto sem a flag.
+  final String? nivel;
 
   double get total => double.parse((quantidade * preco).toStringAsFixed(2));
 
@@ -130,17 +197,23 @@ class ItemPedido {
         'preco': preco,
         'obs': obs,
         'pesado': pesado,
+        if (nivel != null && nivel!.isNotEmpty) 'nivel': nivel,
+        if (nivel != null && nivel!.isNotEmpty) 'tabela_nivel': nivel,
       };
 
-  factory ItemPedido.fromJson(Map<String, dynamic> j) => ItemPedido(
-        productId: (j['product_id'] as num).toInt(),
-        descricao: '${j['descricao'] ?? ''}',
-        unidade: '${j['unidade'] ?? 'UN'}',
-        quantidade: (j['quantidade'] as num).toDouble(),
-        preco: (j['preco'] as num).toDouble(),
-        obs: '${j['obs'] ?? ''}',
-        pesado: j['pesado'] == true,
-      );
+  factory ItemPedido.fromJson(Map<String, dynamic> j) {
+    final nivel = '${j['nivel'] ?? j['tabela_nivel'] ?? ''}'.trim().toLowerCase();
+    return ItemPedido(
+      productId: (j['product_id'] as num).toInt(),
+      descricao: '${j['descricao'] ?? ''}',
+      unidade: '${j['unidade'] ?? 'UN'}',
+      quantidade: (j['quantidade'] as num).toDouble(),
+      preco: (j['preco'] as num).toDouble(),
+      obs: '${j['obs'] ?? ''}',
+      pesado: j['pesado'] == true,
+      nivel: nivel.isNotEmpty ? nivel : null,
+    );
+  }
 
   static List<ItemPedido> listFromJson(String? raw) {
     if (raw == null || raw.isEmpty) return [];
@@ -232,6 +305,8 @@ class Pedido {
                   'quantidade': i.quantidade,
                   'preco': i.preco,
                   if (i.obs.trim().isNotEmpty) 'obs': i.obs.trim(),
+                  if (i.nivel != null && i.nivel!.isNotEmpty) 'nivel': i.nivel,
+                  if (i.nivel != null && i.nivel!.isNotEmpty) 'tabela_nivel': i.nivel,
                 })
             .toList(),
         'aberta_em_vista': abertaEmVista,

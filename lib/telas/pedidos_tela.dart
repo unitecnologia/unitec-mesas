@@ -46,10 +46,28 @@ class _PedidosTelaState extends State<PedidosTela> {
 
   Future<void> _aceitarPrecos(Pedido p) async {
     final precos = (p.detalhes?['precos'] as List<dynamic>? ?? const []).cast<Map<String, dynamic>>();
-    final novos = {for (final x in precos) (x['product_id'] as num).toInt(): (x['preco_atual'] as num).toDouble()};
+    final novos = <int, double>{};
+    final niveis = <int, String>{};
+    for (final x in precos) {
+      final id = (x['product_id'] as num).toInt();
+      novos[id] = (x['preco_atual'] as num).toDouble();
+      final n = '${x['nivel'] ?? ''}'.trim().toLowerCase();
+      if (n.isNotEmpty) niveis[id] = n;
+    }
     final itens = p.itens.map((i) {
       final preco = novos[i.productId];
-      if (preco != null) i.preco = preco;
+      if (preco != null) {
+        return ItemPedido(
+          productId: i.productId,
+          descricao: i.descricao,
+          unidade: i.unidade,
+          quantidade: i.quantidade,
+          preco: preco,
+          obs: i.obs,
+          pesado: i.pesado,
+          nivel: niveis[i.productId] ?? i.nivel,
+        );
+      }
       return i;
     }).toList();
     for (final e in novos.entries) {
