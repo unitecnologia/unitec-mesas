@@ -52,9 +52,30 @@ class _MesasTelaState extends State<MesasTela> {
   }
 
   Future<void> _abrirMesa(int numero) async {
+    final mesa = _mesas[numero];
+    if (mesa != null && mesa.bloqueadaParaLancamento) {
+      final ver = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('${rotuloMesa(numero)} travada'),
+          content: Text(
+            mesa.situacao == SituacaoMesa.aguardandoFechamento
+                ? 'Mesa em fechamento no caixa. Não é possível lançar itens até o caixa liberar.'
+                : 'Mesa em atendimento no caixa${mesa.nomeNoCaixa.isNotEmpty ? ' (${mesa.nomeNoCaixa})' : ''}. '
+                    'Não é possível lançar itens até o caixa liberar.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Voltar')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Ver comanda')),
+          ],
+        ),
+      );
+      if (ver != true || !mounted) return;
+    }
+
     _st.sync.mesasVisiveis = false;
     await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => MesaTela(state: _st, numero: numero, mesa: _mesas[numero]),
+      builder: (_) => MesaTela(state: _st, numero: numero, mesa: mesa),
     ));
     if (!mounted) return;
     _st.sync.mesasVisiveis = true;
@@ -181,14 +202,20 @@ class _MesaTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final m = mesa;
     final situacao = m?.situacao ?? SituacaoMesa.livre;
-    final (fundo, borda, texto) = switch (situacao) {
-      SituacaoMesa.ocupada => (const Color(0xFF1E5A9E), const Color(0xFF1E5A9E), Colors.white),
-      SituacaoMesa.aguardandoFechamento => (const Color(0xFFF59E0B), const Color(0xFFD97706), Colors.black87),
-      _ => (Colors.white, const Color(0xFFCBD5E1), const Color(0xFF334155)),
-    };
+    // Mesmas cores do painel Mesas do PDV (erp-pdv-mesas.css):
+    // Livre=verde | Ocupada=amarelo | Aguardando=vermelho | No caixa/outro=cinza.
+    final noCaixa = m?.noCaixa == true;
+    final aguardando = situacao == SituacaoMesa.aguardandoFechamento;
+    final (fundo, borda, texto) = noCaixa && !aguardando
+        ? (const Color(0xFF64748B), const Color(0xFF475569), Colors.white)
+        : switch (situacao) {
+            SituacaoMesa.ocupada => (const Color(0xFFEAB308), const Color(0xFFCA8A04), const Color(0xFF422006)),
+            SituacaoMesa.aguardandoFechamento => (const Color(0xFFDC2626), const Color(0xFFB91C1C), Colors.white),
+            _ => (const Color(0xFF16A34A), const Color(0xFF15803D), Colors.white),
+          };
     final rotulo = switch (situacao) {
       SituacaoMesa.ocupada => moeda(m!.total),
-      SituacaoMesa.aguardandoFechamento => 'Fechando',
+      SituacaoMesa.aguardandoFechamento => m != null && m.total > 0 ? moeda(m.total) : 'Aguardando',
       _ => 'Livre',
     };
 
@@ -196,7 +223,7 @@ class _MesaTile extends StatelessWidget {
       color: fundo,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: m?.noCaixa == true ? const Color(0xFF7C3AED) : borda, width: m?.noCaixa == true ? 2.5 : 1),
+        side: BorderSide(color: borda, width: 1),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
@@ -209,10 +236,18 @@ class _MesaTile extends StatelessWidget {
               Text(rotulo,
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: texto),
                   overflow: TextOverflow.ellipsis),
-              if (m?.noCaixa == true)
+              if (noCaixa)
                 Text('no caixa', style: TextStyle(fontSize: 10, color: texto.withValues(alpha: 0.85))),
+              if (aguardando && !noCaixa)
+                Text('aguardando', style: TextStyle(fontSize: 10, color: texto.withValues(alpha: 0.9))),
             ]),
           ),
+          if (m?.bloqueadaParaLancamento == true)
+            Positioned(
+              top: 6,
+              left: 6,
+              child: Icon(Icons.lock, size: 14, color: texto.withValues(alpha: 0.9)),
+            ),
           if (pendente)
             const Positioned(
               top: 6,

@@ -166,15 +166,26 @@ class Api {
     }
 
     final erros = body?['errors'];
-    final message = (body?['message'] ??
-            (erros is Map ? erros.values.expand((v) => v is List ? v : [v]).join(' ') : null) ??
-            'Erro HTTP ${r.statusCode}')
-        .toString();
+    final errosTxt = erros is Map ? erros.values.expand((v) => v is List ? v : [v]).join(' ') : null;
+    final message = (body?['message'] ?? errosTxt ?? body?['exception'] ?? 'Erro HTTP ${r.statusCode}').toString().trim();
+    final code = body?['code']?.toString();
+    final exception = body?['exception']?.toString();
+
+    // Texto legível na fila de pedidos (código + HTTP + detalhe do servidor).
+    final partes = <String>[
+      if (code != null && code.isNotEmpty) code,
+      'HTTP ${r.statusCode}',
+      if (message.isNotEmpty) message,
+      if (exception != null &&
+          exception.isNotEmpty &&
+          !message.toLowerCase().contains(exception.toLowerCase()))
+        exception,
+    ];
 
     throw ApiException(
-      erros is Map ? erros.values.expand((v) => v is List ? v : [v]).join(' ') : message,
+      partes.join(' · '),
       statusCode: r.statusCode,
-      code: body?['code']?.toString(),
+      code: code,
       retry: body?['retry'] == true || r.statusCode >= 500 || r.statusCode == 429,
       detalhes: body?['detalhes'] is Map<String, dynamic> ? body!['detalhes'] as Map<String, dynamic> : null,
     );

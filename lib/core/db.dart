@@ -17,20 +17,36 @@ class LocalDb {
     final dir = await getDatabasesPath();
     final db = await openDatabase(
       p.join(dir, 'unitec_mesas.db'),
-      version: 3,
+      version: 5,
       onCreate: (db, _) async {
         final b = db.batch();
         b.execute('''
           CREATE TABLE produtos(
             id INTEGER PRIMARY KEY, codigo TEXT, barras TEXT, descricao TEXT,
-            busca TEXT, unidade TEXT, preco REAL, grupo TEXT, pesado INTEGER)''');
+            busca TEXT, unidade TEXT, preco REAL, grupo TEXT, pesado INTEGER,
+            foto_url TEXT, qtd_vendida REAL DEFAULT 0)''');
         b.execute('CREATE INDEX idx_produtos_codigo ON produtos(codigo)');
         b.execute('CREATE INDEX idx_produtos_barras ON produtos(barras)');
+        b.execute('CREATE INDEX idx_produtos_grupo ON produtos(grupo)');
+        b.execute('''
+          CREATE TABLE grupos(
+            id INTEGER PRIMARY KEY, nome TEXT NOT NULL)''');
         b.execute('''
           CREATE TABLE produto_tab_preco(
             product_id INTEGER PRIMARY KEY,
             niveis_json TEXT NOT NULL,
             precos_json TEXT NOT NULL)''');
+        b.execute('''
+          CREATE TABLE produto_composicao(
+            product_id INTEGER NOT NULL,
+            component_id INTEGER NOT NULL,
+            codigo TEXT,
+            descricao TEXT,
+            quantidade REAL,
+            preco REAL,
+            is_adicional INTEGER DEFAULT 0,
+            PRIMARY KEY (product_id, component_id))''');
+        b.execute('CREATE INDEX idx_produto_composicao_kit ON produto_composicao(product_id)');
         b.execute('''
           CREATE TABLE mesas(
             numero INTEGER PRIMARY KEY, qtd INTEGER, total REAL, situacao INTEGER,
@@ -62,6 +78,35 @@ class LocalDb {
           // Força novo pull do catálogo com tab_preco na próxima sync.
           await db.delete('meta', where: 'k = ?', whereArgs: ['tab_preco_sync']);
         }
+        if (oldVersion < 4) {
+          try {
+            await db.execute('ALTER TABLE produtos ADD COLUMN foto_url TEXT');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE produtos ADD COLUMN qtd_vendida REAL DEFAULT 0');
+          } catch (_) {}
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS grupos(
+              id INTEGER PRIMARY KEY, nome TEXT NOT NULL)''');
+          await db.execute('CREATE INDEX IF NOT EXISTS idx_produtos_grupo ON produtos(grupo)');
+          // Força pull com foto, grupos e ranking.
+          await db.delete('meta', where: 'k = ?', whereArgs: ['catalogo_v4']);
+        }
+        if (oldVersion < 5) {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS produto_composicao(
+              product_id INTEGER NOT NULL,
+              component_id INTEGER NOT NULL,
+              codigo TEXT,
+              descricao TEXT,
+              quantidade REAL,
+              preco REAL,
+              is_adicional INTEGER DEFAULT 0,
+              PRIMARY KEY (product_id, component_id))''');
+          await db.execute(
+              'CREATE INDEX IF NOT EXISTS idx_produto_composicao_kit ON produto_composicao(product_id)');
+          await db.delete('meta', where: 'k = ?', whereArgs: ['catalogo_v5']);
+        }
       },
     );
     return LocalDb._(db);
@@ -70,10 +115,17 @@ class LocalDb {
   // ---------------------------------------------------------------- catálogo
 
   /// Troca o catálogo inteiro numa transação (nunca fica pela metade).
-  Future<void> substituirProdutos(List<dynamic> linhas, {Map<String, dynamic>? tabPreco}) async {
+  Future<void> substituirProdutos(
+    List<dynamic> linhas, {
+    Map<String, dynamic>? tabPreco,
+    List<dynamic>? grupos,
+    Map<String, dynamic>? composicoes,
+  }) async {
     await _db.transaction((txn) async {
       await txn.delete('produtos');
       await txn.delete('produto_tab_preco');
+      await txn.delete('produto_composicao');
+      await txn.delete('grupos');
       var batch = txn.batch();
       var n = 0;
       for (final l in linhas) {
@@ -89,15 +141,30 @@ class LocalDb {
           'preco': (r[5] as num).toDouble(),
           'grupo': '${r[6] ?? ''}',
           'pesado': (r[7] as num).toInt(),
+          'foto_url': r.length > 8 ? (r[8]?.toString() ?? '') : '',
+          'qtd_vendida': r.length > 9 ? (r[9] as num?)?.toDouble() ?? 0 : 0,
         });
         if (++n % 500 == 0) {
           await batch.commit(noResult: true);
           batch = txn.batch();
         }
       }
+      if (grupos != null) {
+        for (final g in grupos) {
+          if (g is! Map) continue;
+          final id = (g['id'] as num?)?.toInt();
+          final nome = '${g['nome'] ?? ''}'.trim();
+          if (id == null || id <= 0 || nome.isEmpty) continue;
+          batch.insert('grupos', {'id': id, 'nome': nome});
+          if (++n % 500 == 0) {
+            await batch.commit(noResult: true);
+            batch = txn.batch();
+          }
+        }
+      }
       if (tabPreco != null) {
         for (final e in tabPreco.entries) {
-          final id = int.tryParse('${e.key}');
+          final id = int.tryParse(e.key.toString());
           if (id == null || e.value is! Map) continue;
           final info = TabPrecoInfo.fromApi(Map<String, dynamic>.from(e.value as Map));
           if (!info.ativo) continue;
@@ -105,6 +172,30 @@ class LocalDb {
           if (++n % 500 == 0) {
             await batch.commit(noResult: true);
             batch = txn.batch();
+          }
+        }
+      }
+      if (composicoes != null) {
+        for (final e in composicoes.entries) {
+          final kitId = int.tryParse(e.key.toString());
+          if (kitId == null || e.value is! List) continue;
+          for (final raw in e.value as List) {
+            if (raw is! Map) continue;
+            final c = CompComponente.fromApi(Map<String, dynamic>.from(raw));
+            if (c.id <= 0) continue;
+            batch.insert('produto_composicao', {
+              'product_id': kitId,
+              'component_id': c.id,
+              'codigo': c.codigo,
+              'descricao': c.descricao,
+              'quantidade': c.quantidade,
+              'preco': c.preco,
+              'is_adicional': c.isAdicional ? 1 : 0,
+            });
+            if (++n % 500 == 0) {
+              await batch.commit(noResult: true);
+              batch = txn.batch();
+            }
           }
         }
       }
@@ -117,7 +208,29 @@ class LocalDb {
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
+      await txn.insert(
+        'meta',
+        {'k': 'catalogo_v4', 'v': '1'},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      if (composicoes != null) {
+        await txn.insert(
+          'meta',
+          {'k': 'catalogo_v5', 'v': '1'},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
     });
+  }
+
+  Future<List<CompComponente>> composicaoDoProduto(int productId) async {
+    final rows = await _db.query(
+      'produto_composicao',
+      where: 'product_id = ?',
+      whereArgs: [productId],
+      orderBy: 'is_adicional DESC, descricao ASC',
+    );
+    return rows.map(CompComponente.fromRow).toList();
   }
 
   Future<TabPrecoInfo?> tabPrecoDoProduto(int productId) async {
@@ -138,10 +251,24 @@ class LocalDb {
   Future<void> setMeta(String key, String value) =>
       _db.insert('meta', {'k': key, 'v': value}, conflictAlgorithm: ConflictAlgorithm.replace);
 
-  Future<List<Produto>> buscarProdutos(String termo, {int limite = 60}) async {
+  Future<List<GrupoCatalogo>> listarGrupos() async {
+    final rows = await _db.query('grupos', orderBy: 'nome');
+    return rows.map(GrupoCatalogo.fromRow).toList();
+  }
+
+  /// Busca catálogo. Sem termo: ordena pelos mais vendidos (60 dias, vindo do servidor).
+  /// Com [grupo], filtra pelo nome do cadastro de Grupos (Mostrar no App).
+  Future<List<Produto>> buscarProdutos(String termo, {String? grupo, int limite = 80}) async {
     final t = normalizarBusca(termo);
+    final g = (grupo ?? '').trim();
+    final grupoClause = g.isEmpty ? '' : ' AND UPPER(grupo) = UPPER(?)';
+
     if (t.isEmpty) {
-      final rows = await _db.query('produtos', orderBy: 'descricao', limit: limite);
+      final rows = await _db.rawQuery(
+        'SELECT * FROM produtos WHERE 1=1$grupoClause '
+        'ORDER BY qtd_vendida DESC, descricao LIMIT ?',
+        [...(g.isEmpty ? <Object?>[] : [g]), limite],
+      );
       return rows.map(Produto.fromRow).toList();
     }
 
@@ -152,10 +279,11 @@ class LocalDb {
       where.add('busca LIKE ?');
       args.add('%$w%');
     }
+    if (g.isNotEmpty) args.add(g);
 
     final rows = await _db.rawQuery(
-      'SELECT * FROM produtos WHERE (codigo = ? OR barras = ?) OR (${where.join(' AND ')}) '
-      'ORDER BY (codigo = ? OR barras = ?) DESC, (busca LIKE ?) DESC, descricao LIMIT ?',
+      'SELECT * FROM produtos WHERE ((codigo = ? OR barras = ?) OR (${where.join(' AND ')}))$grupoClause '
+      'ORDER BY (codigo = ? OR barras = ?) DESC, qtd_vendida DESC, (busca LIKE ?) DESC, descricao LIMIT ?',
       [t, t, ...args, t, t, '$t%', limite],
     );
     return rows.map(Produto.fromRow).toList();

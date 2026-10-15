@@ -66,6 +66,10 @@ class _PedidosTelaState extends State<PedidosTela> {
           obs: i.obs,
           pesado: i.pesado,
           nivel: niveis[i.productId] ?? i.nivel,
+          composicaoRemovidos: i.composicaoRemovidos,
+          composicaoAdicionais: i.composicaoAdicionais,
+          composicaoLinhas: i.composicaoLinhas,
+          acrescimo: i.acrescimo,
         );
       }
       return i;
@@ -146,20 +150,34 @@ class _PedidosTelaState extends State<PedidosTela> {
             style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 4),
-          for (final it in p.itens)
+          for (final it in p.itens) ...[
             Text(
-              '${quantidade(it.quantidade)} × ${it.descricao}${it.obs.isNotEmpty ? ' (${it.obs})' : ''}',
+              '${quantidade(it.quantidade)} × ${it.descricao}',
               style: const TextStyle(fontSize: 12),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-          if (p.erroMsg != null && p.status != StatusPedido.enviado) ...[
+            for (final linha in it.composicaoLinhas)
+              Text(linha, style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+            if (it.obs.isNotEmpty)
+              Text('Obs: ${it.obs}', style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
+          ],
+          if ((p.erroMsg != null || p.erroCode != null) && p.status != StatusPedido.enviado) ...[
             const SizedBox(height: 6),
-            Text(p.erroMsg!,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: p.status == StatusPedido.erro ? cs.error : const Color(0xFFB45309),
-                )),
+            SelectableText(
+              [
+                if (p.erroCode != null &&
+                    p.erroCode!.isNotEmpty &&
+                    !(p.erroMsg ?? '').contains(p.erroCode!))
+                  p.erroCode!,
+                if (p.erroMsg != null && p.erroMsg!.isNotEmpty) p.erroMsg!,
+              ].join('\n'),
+              style: TextStyle(
+                fontSize: 12,
+                height: 1.25,
+                color: p.status == StatusPedido.erro ? cs.error : const Color(0xFFB45309),
+              ),
+            ),
           ],
           if (p.status == StatusPedido.erro) ...[
             const SizedBox(height: 6),

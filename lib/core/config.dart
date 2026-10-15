@@ -32,6 +32,11 @@ class AppConfig {
 
   static const _key = 'unitec_mesas_config';
 
+  /// Chaves extras: sobrevivem mesmo se o JSON principal corromper.
+  /// Só somem ao desinstalar o app (comportamento desejado).
+  static const _keyUuid = 'unitec_mesas_device_uuid';
+  static const _keyApproved = 'unitec_mesas_device_approved';
+
   Map<String, dynamic> toJson() => {
         'baseUrl': baseUrl,
         'lastBaseUrl': lastBaseUrl,
@@ -79,12 +84,24 @@ class AppConfig {
         config._fromJson(jsonDecode(raw) as Map<String, dynamic>);
       } catch (_) {}
     }
+    // Restaura identidade/aprovação se o JSON falhou ou veio incompleto.
+    final uuidBackup = prefs.getString(_keyUuid) ?? '';
+    if (config.deviceUuid.isEmpty && uuidBackup.isNotEmpty) {
+      config.deviceUuid = uuidBackup;
+    }
+    if (!config.deviceApproved && prefs.getBool(_keyApproved) == true) {
+      config.deviceApproved = true;
+    }
     return config;
   }
 
   Future<void> save() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_key, jsonEncode(toJson()));
+    if (deviceUuid.isNotEmpty) {
+      await prefs.setString(_keyUuid, deviceUuid);
+    }
+    await prefs.setBool(_keyApproved, deviceApproved);
   }
 
   void clearSession() {

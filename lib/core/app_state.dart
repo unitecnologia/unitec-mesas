@@ -29,6 +29,16 @@ class AppState extends ChangeNotifier {
     await state._garantirAparelho();
     await db.limparHistorico();
 
+    // Reinício do app: confirma aprovação no servidor com o mesmo UUID.
+    // Só pede autorização de novo se o aparelho for novo/revogado (ex.: app desinstalado).
+    if (config.isConnected && config.deviceUuid.isNotEmpty) {
+      try {
+        await state.verificarAprovacao();
+      } catch (_) {
+        // Offline ou falha temporária: mantém o que está salvo no celular.
+      }
+    }
+
     if (config.hasSession) {
       state.etapa = Etapa.mesas;
       state.sync.iniciar();
@@ -173,12 +183,39 @@ class AppState extends ChangeNotifier {
     sync.pausar();
     config.clearSession();
     if (e.aparelhoBloqueado) {
-      config.deviceApproved = false;
-      etapa = Etapa.aguardandoAprovacao;
+      // Revogado/excluído no ERP: bloqueia. Outros 403 não apagam a aprovação local.
+      if (e.code == 'device_revoked') {
+        config.deviceApproved = false;
+        etapa = Etapa.aguardandoAprovacao;
+      } else if (e.code == 'device_not_approved' || e.code == 'device_required') {
+        // Confirma no servidor antes de jogar o garçom de volta na fila
+        // (evita pedir autorização de novo só porque a sessão caiu).
+        _confirmarBloqueioAparelho();
+        return;
+      } else {
+        etapa = Etapa.login;
+      }
     } else {
       etapa = Etapa.login;
     }
     config.save();
+    notifyListeners();
+  }
+
+  Future<void> _confirmarBloqueioAparelho() async {
+    try {
+      final ok = await verificarAprovacao();
+      if (ok) {
+        etapa = Etapa.login;
+      } else {
+        config.deviceApproved = false;
+        etapa = Etapa.aguardandoAprovacao;
+      }
+    } catch (_) {
+      // Sem rede: mantém aprovação local e só pede login de novo.
+      etapa = config.deviceApproved ? Etapa.login : Etapa.aguardandoAprovacao;
+    }
+    await config.save();
     notifyListeners();
   }
 }

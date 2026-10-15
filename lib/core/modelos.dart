@@ -10,6 +10,8 @@ class Produto {
     required this.preco,
     required this.grupo,
     required this.pesado,
+    this.fotoUrl = '',
+    this.qtdVendida = 0,
   });
 
   final int id;
@@ -21,6 +23,12 @@ class Produto {
   final String grupo;
   final bool pesado;
 
+  /// Caminho relativo da foto no ERP (ex.: /api/v1/mesas/produtos/1/foto?v=…).
+  final String fotoUrl;
+
+  /// Quantidade vendida nos últimos 60 dias (ranking do servidor).
+  final double qtdVendida;
+
   factory Produto.fromRow(Map<String, Object?> r) => Produto(
         id: r['id'] as int,
         codigo: '${r['codigo'] ?? ''}',
@@ -30,6 +38,26 @@ class Produto {
         preco: (r['preco'] as num?)?.toDouble() ?? 0,
         grupo: '${r['grupo'] ?? ''}',
         pesado: (r['pesado'] as int? ?? 0) == 1,
+        fotoUrl: '${r['foto_url'] ?? ''}',
+        qtdVendida: (r['qtd_vendida'] as num?)?.toDouble() ?? 0,
+      );
+}
+
+/// Grupo do cadastro ERP (ativo + Mostrar no App), igual ao Força de Vendas.
+class GrupoCatalogo {
+  GrupoCatalogo({required this.id, required this.nome});
+
+  final int id;
+  final String nome;
+
+  factory GrupoCatalogo.fromApi(Map<String, dynamic> m) => GrupoCatalogo(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        nome: '${m['nome'] ?? ''}'.trim(),
+      );
+
+  factory GrupoCatalogo.fromRow(Map<String, Object?> r) => GrupoCatalogo(
+        id: r['id'] as int,
+        nome: '${r['nome'] ?? ''}',
       );
 }
 
@@ -122,6 +150,10 @@ class MesaInfo {
   final String nomeNoCaixa;
   final String? abertaEm;
 
+  /// Pré-conta / caixa: garçom não lança itens até o caixa liberar (mesma regra do PDV).
+  bool get bloqueadaParaLancamento =>
+      situacao == SituacaoMesa.aguardandoFechamento || noCaixa;
+
   factory MesaInfo.fromRow(Map<String, Object?> r) => MesaInfo(
         numero: r['numero'] as int,
         qtd: r['qtd'] as int? ?? 0,
@@ -164,6 +196,46 @@ class MesaInfo {
       };
 }
 
+/// Componente de composição vindo do catálogo ERP.
+class CompComponente {
+  CompComponente({
+    required this.id,
+    required this.codigo,
+    required this.descricao,
+    required this.quantidade,
+    required this.preco,
+    required this.isAdicional,
+  });
+
+  final int id;
+  final String codigo;
+  final String descricao;
+  final double quantidade;
+  final double preco;
+  final bool isAdicional;
+
+  /// Valor unitário do adicional no kit (preço × qtd da composição).
+  double get valorUnitario => double.parse((preco * quantidade).toStringAsFixed(2));
+
+  factory CompComponente.fromApi(Map<String, dynamic> m) => CompComponente(
+        id: (m['id'] as num?)?.toInt() ?? 0,
+        codigo: '${m['codigo'] ?? ''}',
+        descricao: '${m['descricao'] ?? ''}'.trim(),
+        quantidade: (m['quantidade'] as num?)?.toDouble() ?? 1,
+        preco: (m['preco'] as num?)?.toDouble() ?? 0,
+        isAdicional: m['is_adicional'] == true || m['is_adicional'] == 1,
+      );
+
+  factory CompComponente.fromRow(Map<String, Object?> r) => CompComponente(
+        id: r['component_id'] as int,
+        codigo: '${r['codigo'] ?? ''}',
+        descricao: '${r['descricao'] ?? ''}',
+        quantidade: (r['quantidade'] as num?)?.toDouble() ?? 1,
+        preco: (r['preco'] as num?)?.toDouble() ?? 0,
+        isAdicional: (r['is_adicional'] as int? ?? 0) == 1,
+      );
+}
+
 class ItemPedido {
   ItemPedido({
     required this.productId,
@@ -174,7 +246,13 @@ class ItemPedido {
     this.obs = '',
     this.pesado = false,
     this.nivel,
-  });
+    List<int>? composicaoRemovidos,
+    List<int>? composicaoAdicionais,
+    List<String>? composicaoLinhas,
+    this.acrescimo = 0,
+  })  : composicaoRemovidos = List<int>.from(composicaoRemovidos ?? const []),
+        composicaoAdicionais = List<int>.from(composicaoAdicionais ?? const []),
+        composicaoLinhas = List<String>.from(composicaoLinhas ?? const []);
 
   final int productId;
   final String descricao;
@@ -187,7 +265,27 @@ class ItemPedido {
   /// Nível Tab. Preço (varejo/atacado/especial). Null = produto sem a flag.
   final String? nivel;
 
-  double get total => double.parse((quantidade * preco).toStringAsFixed(2));
+  /// Componentes base desmarcados (SEM …).
+  List<int> composicaoRemovidos;
+
+  /// Adicionais marcados (extras cobrados).
+  List<int> composicaoAdicionais;
+
+  /// Textos para exibição/cozinha (fora de obs): SEM … / ADICIONAL: …
+  List<String> composicaoLinhas;
+
+  /// Valor total dos adicionais para a quantidade do item.
+  double acrescimo;
+
+  double get total => double.parse(((quantidade * preco) + acrescimo).toStringAsFixed(2));
+
+  String get _chaveComp {
+    final r = [...composicaoRemovidos]..sort();
+    final a = [...composicaoAdicionais]..sort();
+    return '${r.join(',')}|${a.join(',')}';
+  }
+
+  bool mesmaSelecaoComposicao(ItemPedido o) => _chaveComp == o._chaveComp;
 
   Map<String, dynamic> toJson() => {
         'product_id': productId,
@@ -197,6 +295,10 @@ class ItemPedido {
         'preco': preco,
         'obs': obs,
         'pesado': pesado,
+        'acrescimo': acrescimo,
+        'composicao_removidos': composicaoRemovidos,
+        'composicao_adicionais': composicaoAdicionais,
+        if (composicaoLinhas.isNotEmpty) 'composicao_linhas': composicaoLinhas,
         if (nivel != null && nivel!.isNotEmpty) 'nivel': nivel,
         if (nivel != null && nivel!.isNotEmpty) 'tabela_nivel': nivel,
       };
@@ -212,7 +314,30 @@ class ItemPedido {
       obs: '${j['obs'] ?? ''}',
       pesado: j['pesado'] == true,
       nivel: nivel.isNotEmpty ? nivel : null,
+      acrescimo: (j['acrescimo'] as num?)?.toDouble() ?? 0,
+      composicaoRemovidos: _idsJson(j['composicao_removidos']),
+      composicaoAdicionais: _idsJson(j['composicao_adicionais']),
+      composicaoLinhas: _linhasJson(j['composicao_linhas']),
     );
+  }
+
+  static List<String> _linhasJson(dynamic raw) {
+    if (raw is! List) return [];
+    return [
+      for (final e in raw)
+        if (e is String && e.trim().isNotEmpty)
+          e.trim()
+        else if (e is Map && '${e['texto'] ?? ''}'.trim().isNotEmpty)
+          '${e['texto']}'.trim(),
+    ];
+  }
+
+  static List<int> _idsJson(dynamic raw) {
+    if (raw is! List) return [];
+    return [
+      for (final e in raw)
+        if ((e is num ? e.toInt() : int.tryParse('$e') ?? 0) > 0) (e is num ? e.toInt() : int.parse('$e')),
+    ];
   }
 
   static List<ItemPedido> listFromJson(String? raw) {
@@ -307,6 +432,8 @@ class Pedido {
                   if (i.obs.trim().isNotEmpty) 'obs': i.obs.trim(),
                   if (i.nivel != null && i.nivel!.isNotEmpty) 'nivel': i.nivel,
                   if (i.nivel != null && i.nivel!.isNotEmpty) 'tabela_nivel': i.nivel,
+                  if (i.composicaoRemovidos.isNotEmpty) 'composicao_removidos': i.composicaoRemovidos,
+                  if (i.composicaoAdicionais.isNotEmpty) 'composicao_adicionais': i.composicaoAdicionais,
                 })
             .toList(),
         'aberta_em_vista': abertaEmVista,
